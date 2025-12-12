@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+env/
+venv/
+ENV/
+.env
+
+# PyCharm / VSCode
+.idea/
+.vscode/
+
+# Mac
+.DS_Store
+
+# Model / large data (remove if you actually want to commit model)
+*.csv
+*.ipynb
+*.h5
+
+# Node (if present)
+node_modules/
+
+# Secrets file
+.env
+
+# uploads (optional: you can keep or ignore uploads)
+uploads/

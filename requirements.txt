@@ -1,0 +1,10 @@
+flask
+flask-cors
+pymongo
+dnspython
+pandas
+numpy
+scikit-learn
+gunicorn
+openai
+python-dotenv
