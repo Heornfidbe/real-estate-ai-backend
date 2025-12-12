@@ -8,3 +8,4 @@ scikit-learn
 gunicorn
 openai
 python-dotenv
+xgboost
