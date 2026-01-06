@@ -10,8 +10,15 @@ import firebase_admin
 from firebase_admin import credentials, auth as admin_auth
 from datetime import datetime
 
-cred = credentials.Certificate("mumbai-real-estate-ai-firebase-adminsdk-fbsvc-854a84cdb6.json")
-firebase_admin.initialize_app(cred)
+firebase_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+
+if not firebase_json:
+    raise RuntimeError("FIREBASE_SERVICE_ACCOUNT env variable not set")
+cred = credentials.Certificate(json.loads(firebase_json))
+initialize_app(cred)
+
+# cred = credentials.Certificate("mumbai-real-estate-ai-firebase-adminsdk-fbsvc-854a84cdb6.json")
+# firebase_admin.initialize_app(cred)
 
 
 from database import listings_collection
