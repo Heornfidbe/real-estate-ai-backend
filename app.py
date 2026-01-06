@@ -4,10 +4,16 @@ import os
 import pickle
 import numpy as np
 import pandas as pd
-from bson import ObjectId
+from bson import ObjectId 
 import json
+import firebase_admin
+from firebase_admin import credentials, auth as admin_auth
+from datetime import datetime
 
-# MongoDB
+cred = credentials.Certificate("mumbai-real-estate-ai-firebase-adminsdk-fbsvc-854a84cdb6.json")
+firebase_admin.initialize_app(cred)
+
+
 from database import listings_collection
 
 app = Flask(__name__)
@@ -77,43 +83,52 @@ def add_property():
     data = request.form
     file = request.files.get("image")
 
-    # ✅ DEBUG PRINTS (Will show in terminal)
     print("\n--- NEW PROPERTY SUBMISSION ---")
     print("FORM RECEIVED:", dict(data))
     print("FILES RECEIVED:", file.filename if file else "No File")
     print("--------------------------------\n")
 
-    # USER ID from Google login
-    user_id = data.get("user_id")
+    # 🔒 REQUIRED FIELDS CHECK
+    required_fields = [
+        "user_id", "owner_name", "contact",
+        "title", "region", "bhk", "area", "price"
+    ]
 
-    # IMAGE HANDLING (optional)
+    for field in required_fields:
+        if not data.get(field):
+            return jsonify({
+                "success": False,
+                "error": f"Missing field: {field}"
+            }), 400
+
+    # IMAGE
     filename = None
     if file and file.filename:
         filename = file.filename
         file.save(os.path.join(UPLOAD_FOLDER, filename))
 
-    # AMENITIES HANDLING
+    # AMENITIES
     try:
         amenities = json.loads(data.get("amenities", "[]"))
     except:
         amenities = []
 
     new_listing = {
-        "user_id": user_id,
+        "user_id": data.get("user_id"),
         "owner_name": data.get("owner_name"),
         "contact": data.get("contact"),
         "title": data.get("title"),
         "region": data.get("region"),
-        "subarea": data.get("subarea"),
-        "bhk": data.get("bhk"),
-        "area": data.get("area"),
-        "price": data.get("price"),
-        "description": data.get("description"),
-        "property_type": data.get("property_type"),
-        "furnish": data.get("furnish"),
-        "construction_status": data.get("construction_status"),
-        "property_age": data.get("property_age"),
-        "builder": data.get("builder"),
+        "subarea": data.get("subarea", ""),
+        "bhk": int(data.get("bhk")),
+        "area": float(data.get("area")),
+        "price": float(data.get("price")),
+        "description": data.get("description", ""),
+        "property_type": data.get("property_type", ""),
+        "furnish": data.get("furnish", ""),
+        "construction_status": data.get("construction_status", ""),
+        "property_age": data.get("property_age", ""),
+        "builder": data.get("builder", ""),
         "amenities": amenities,
         "image": filename
     }
@@ -130,12 +145,45 @@ def add_property():
 # ----------------------------------
 @app.route("/listings")
 def listings():
+    region = request.args.get("region")
+    bhk = request.args.get("bhk")
+    sort = request.args.get("sort", "asc")
+
+    page = int(request.args.get("page", 1))
+    limit = int(request.args.get("limit", 20))
+    skip = (page - 1) * limit
+
+    query = {}
+
+    if region:
+        query["region"] = {
+            "$regex": f"^{region.strip()}$",
+            "$options": "i"
+        }
+
+    if bhk:
+        try:
+            query["bhk"] = int(bhk)
+        except:
+            pass
+
+    sort_order = 1 if sort == "asc" else -1
+
+    cursor = (
+        listings_collection
+        .find(query)
+        .sort("price", sort_order)
+        .skip(skip)
+        .limit(limit)
+    )
+
     results = []
-    for item in listings_collection.find():
+    for item in cursor:
         item["_id"] = str(item["_id"])
         results.append(item)
 
     return jsonify(results)
+
 
 @app.route("/listing/<listing_id>")
 def get_listing(listing_id):
@@ -294,13 +342,12 @@ def investment_score():
     data = request.get_json()
 
     try:
-        price = float(data.get("price", 0))
+        price = float(data.get("price", 0))     # Listed price
         area = float(data.get("area", 0))
         bhk = float(data.get("bhk", 0))
         region = str(data.get("region", "")).strip()
 
         # ---- ML PRICE PREDICTION ---- #
-        # Build vector like /predict
         row = {col: 0 for col in columns}
         row["bhk"] = bhk
         row["area"] = area
@@ -310,46 +357,96 @@ def investment_score():
             row[region_col] = 1
 
         X = pd.DataFrame([row], columns=columns)
-        log_pred = model.predict(X)[0]
-        ml_price = float(np.expm1(log_pred))  # Lakhs
+        ml_price = float(np.expm1(model.predict(X)[0]))  # Lakhs
 
-        # ---- MARKET PRICE FROM USER LISTING ---- #
-        market_price = price  # already in lakhs
+        # ---- PRICE DIFFERENCE ---- #
+        diff = ml_price - price   # IMPORTANT: keep direction
 
-        # ---- SCORE CALCULATION ---- #
-        diff = abs(market_price - ml_price)
-
-        if diff < 10:
+        # ---- SCORING LOGIC ---- #
+        if diff > 50:
             score = 90
             risk = "Low Risk"
-            reason = "Price matches market trends."
-        elif diff < 25:
-            score = 70
+            reason = "Property is significantly undervalued."
+        elif diff > 20:
+            score = 75
             risk = "Moderate Risk"
-            reason = "Price slightly different than expected."
+            reason = "Property priced below market value."
+        elif diff > -10:
+            score = 60
+            risk = "Neutral"
+            reason = "Property priced close to market value."
         else:
-            score = 40
+            score = 35
             risk = "High Risk"
-            reason = "Price far from expected valuation."
+            reason = "Property appears overpriced."
 
         return jsonify({
             "ml_price": round(ml_price, 2),
-            "market_price": round(market_price, 2),
-            "final_price": round((ml_price + market_price) / 2, 2),
+            "market_price": round(price, 2),
             "score": score,
             "risk": risk,
             "reason": reason
         })
 
-    except Exception as e:
+    except Exception:
         return jsonify({
-            "ml_price": 0,
-            "market_price": price,
-            "final_price": price,
             "score": 20,
             "risk": "High Risk",
-            "reason": "Uncertain future value"
+            "reason": "Unable to evaluate investment."
         })
+    
+@app.route("/admin/users", methods=["GET"])
+def get_all_users():
+    users = []
+
+    for user in admin_auth.list_users().iterate_all():
+        blocked = False
+        if user.custom_claims and user.custom_claims.get("blocked"):
+            blocked = True
+
+        users.append({
+            "uid": user.uid,
+            "email": user.email,
+            "name": user.display_name,  # 👈 USER NAME
+            "blocked": blocked,
+            "createdAt": datetime.fromtimestamp(
+                user.user_metadata.creation_timestamp / 1000
+            ).strftime("%Y-%m-%d")  # 👈 readable date
+        })
+
+    return jsonify({
+        "count": len(users),
+        "users": users
+    })
+
+@app.route("/admin/block-user/<uid>", methods=["POST"])
+def block_user(uid):
+    from firebase_admin import auth
+
+    auth.set_custom_user_claims(uid, {
+        "blocked": True
+    })
+
+    return jsonify({"success": True})
+
+@app.route("/admin/unblock-user/<uid>", methods=["POST"])
+def unblock_user(uid):
+    from firebase_admin import auth
+
+    auth.set_custom_user_claims(uid, {
+        "blocked": False
+    })
+
+    return jsonify({"success": True})
+
+@app.route("/admin/delete-user/<uid>", methods=["DELETE"])
+def delete_user(uid):
+    from firebase_admin import auth
+    auth.delete_user(uid)
+    return jsonify({"success": True})
+
+
+
 
 
 # ----------------------------------

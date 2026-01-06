@@ -1,114 +1,94 @@
-import pandas as pd
 import random
-import requests
-import os
-from bson import ObjectId
-from database import listings_collection   # your MongoDB connection
+import pandas as pd
+from pymongo import MongoClient
 
-# -----------------------------
-# LOAD CSV
-# -----------------------------
-df = pd.read_csv("mumbai.csv")  # <-- CHANGE THIS TO YOUR FILE NAME
-df = df.dropna()
+# ---------------- CONFIG ---------------- #
 
-# -----------------------------
-# FIX PRICE → Convert to Lakhs
-# -----------------------------
-if "price_lakhs" in df.columns:
-    df["price_lakhs"] = df["price_lakhs"].astype(float)
+MONGO_URI = "mongodb+srv://partht349_db_user:parth0057@cluster0.xsstakm.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+DB_NAME = "realestate_db"
+COLLECTION = "listings"
 
-elif "price" in df.columns:
-    df["price"] = df["price"].astype(float)
+CSV_PATH = "mumbai.csv"   # keep this file in same folder
+TOTAL_LISTINGS = 10000    # how many you want
 
-    if "price_unit" in df.columns:
-        def convert_to_lakhs(row):
-            price = row["price"]
-            unit = str(row["price_unit"]).lower()
+# ---------------- DATA POOLS ---------------- #
 
-            if unit.startswith("cr"):   # crore → lakhs
-                return price * 100
-            else:  # assume already lakhs
-                return price
-
-        df["price_lakhs"] = df.apply(convert_to_lakhs, axis=1)
-    else:
-        df["price_lakhs"] = df["price"]  # assume price is already in lakhs
-
-else:
-    raise Exception("CSV must contain price or price_lakhs column.")
-
-
-# -----------------------------
-# RANDOM DATA GENERATORS
-# -----------------------------
-owner_names = [
-    "Rohan Mehta", "Anjali Sharma", "Vikram Kapoor", "Nisha Patel",
-    "Arjun Singh", "Priya Desai", "Karan Thakur", "Meera Joshi"
+OWNER_NAMES = [
+    "Amit Sharma", "Rohit Verma", "Suresh Iyer", "Nikhil Patil",
+    "Ankit Jain", "Rahul Mehta", "Kunal Shah", "Vikas Singh",
+    "Sanjay Gupta", "Deepak Malhotra", "Harsh Kapoor",
+    "Manish Agarwal", "Arjun Rao", "Akash Kulkarni",
+    "Pratik Deshmukh", "Naveen Joshi", "Vivek Mishra"
 ]
 
-descriptions = [
-    "A beautiful property with excellent connectivity and premium amenities.",
-    "Spacious rooms, modern design, and located in a peaceful neighbourhood.",
-    "Prime location with great investment potential.",
-    "Well-maintained flat with ample sunlight and ventilation.",
-    "Luxury apartment with top-class facilities.",
-    "Affordable home in a fast-growing locality."
+DESCRIPTIONS = [
+    "Spacious flat with excellent ventilation",
+    "Prime location with easy metro access",
+    "Ideal for families, peaceful locality",
+    "Well maintained society with amenities",
+    "Close to schools, malls and hospitals",
+    "Modern interiors with premium fittings",
+    "Great investment opportunity",
+    "Ready to move property",
+    "Sea breeze and open view",
+    "Low density residential area"
 ]
 
-titles = [
-    "Luxury Apartment for Sale",
-    "Spacious Family Home",
-    "Modern Flat in Prime Area",
-    "Affordable Housing Opportunity",
-    "Premium Residential Property",
-    "Exclusive Listing — Must See!"
+PROPERTY_TYPES = [
+    "Apartment", "Villa", "Studio",
+    "Penthouse", "Row House", "Duplex"
 ]
 
+FURNISHING = [
+    "Unfurnished", "Semi-Furnished", "Fully Furnished"
+]
 
-# -----------------------------
-# IMAGE DOWNLOAD DIRECTORY
-# -----------------------------
-IMAGE_DIR = "uploads"
-os.makedirs(IMAGE_DIR, exist_ok=True)
+# ---------------- LOAD CSV ---------------- #
 
-UNSPLASH_QUERY = "luxury apartment interior"
-UNSPLASH_URL = f"https://source.unsplash.com/random/900x600/?{UNSPLASH_QUERY}"
+df = pd.read_csv(CSV_PATH)
 
+# Expecting at least a "region" column
+regions = df["region"].dropna().unique().tolist()
 
-# -----------------------------
-# INSERTING INTO MONGODB
-# -----------------------------
-count = 0
+# ---------------- DB CONNECT ---------------- #
 
-for _, row in df.iterrows():
+client = MongoClient(MONGO_URI)
+db = client[DB_NAME]
+collection = db[COLLECTION]
 
-    # Download random HQ image
-    try:
-        img_data = requests.get(UNSPLASH_URL).content
-        img_filename = f"prop_{random.randint(100000, 999999)}.jpg"
-        img_path = os.path.join(IMAGE_DIR, img_filename)
+# ---------------- GENERATE LISTINGS ---------------- #
 
-        with open(img_path, "wb") as f:
-            f.write(img_data)
-    except:
-        img_filename = None
+listings = []
 
-    # Build property object
+for _ in range(TOTAL_LISTINGS):
+    bhk = random.randint(1, 8)
+    area = random.randint(350, 2500)
+
+    # 🔑 PRICE IN LAKHS ONLY
+    price = round((area * random.uniform(0.008, 0.02)), 2)
+    price = max(15, min(price, 250))  # clamp between 15L and 2.5Cr (but still Lakhs)
+
     listing = {
-        "owner_name": random.choice(owner_names),
+        "user_id": "seeded_admin",
+        "owner_name": random.choice(OWNER_NAMES),
         "contact": f"9{random.randint(100000000, 999999999)}",
-        "title": random.choice(titles),
-        "region": str(row["region"]),
-        "bhk": int(row["bhk"]),
-        "area": float(row["area"]),
-        "price": float(row["price_lakhs"]),
-        "description": random.choice(descriptions),
-        "image": img_filename
+        "title": f"{bhk} BHK {random.choice(PROPERTY_TYPES)}",
+        "region": random.choice(regions),
+        "subarea": "Mumbai",
+        "bhk": bhk,
+        "area": area,
+        "price": price,  # ✅ ALWAYS LAKHS
+        "description": random.choice(DESCRIPTIONS),
+        "property_type": random.choice(PROPERTY_TYPES),
+        "furnish": random.choice(FURNISHING),
+        "amenities": ["Parking", "Lift", "Security"],
+        "image": None
     }
 
-    listings_collection.insert_one(listing)
-    count += 1
+    listings.append(listing)
 
+# ---------------- INSERT ---------------- #
 
-print(f"✅ SUCCESS: Inserted {count} properties into MongoDB!")
-print("📸 Images saved inside /uploads/")
+collection.insert_many(listings)
+
+print(f"✅ Successfully inserted {len(listings)} listings (prices in Lakhs only)")
