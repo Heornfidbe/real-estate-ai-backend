@@ -12,8 +12,7 @@ from datetime import datetime
 
 firebase_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
 
-if not firebase_json:
-    raise RuntimeError("FIREBASE_SERVICE_ACCOUNT env variable not set")
+
 cred = credentials.Certificate(json.loads(firebase_json))
 initialize_app(cred)
 
