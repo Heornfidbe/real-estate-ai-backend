@@ -28,3 +28,7 @@ node_modules/
 
 # uploads (optional: you can keep or ignore uploads)
 uploads/
+
+# Secrets
+*.json
+.env
