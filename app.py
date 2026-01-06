@@ -7,7 +7,7 @@ import pandas as pd
 from bson import ObjectId 
 import json
 import firebase_admin
-from firebase_admin import credentials, auth as admin_auth
+from firebase_admin import credentials, auth as admin_auth ,initialize_app
 from datetime import datetime
 
 firebase_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
