@@ -9,3 +9,5 @@ gunicorn
 openai
 python-dotenv
 xgboost
+firebase
+firebase_admin
